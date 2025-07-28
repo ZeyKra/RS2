@@ -3,8 +3,7 @@ mod deprecated;
 use rdev::{listen, Event, EventType, simulate, Button, Key};
 
 use std::io;
-use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
-use std::time::Duration;
+use std::sync::atomic::AtomicBool;
 use std::{thread, time};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
@@ -22,16 +21,14 @@ fn main() {
     static mut ENABLED: bool = false;
     static mut IS_CLICKING: bool = false;
     static mut IS_SIMULATED: bool = false;
-
-
     println!("Entrez le nombre de cps :");
     let mut input = String::new();
     io::stdin()
         .read_line(&mut input)
         .expect("Erreur lors de la saisie");
-    let cps: Arc<AtomicU16> = Arc::new(AtomicU16::new(input.trim().parse().expect("Mauvais")));
 
-    let mut cps_delay: u32 = if cps.load(Ordering::SeqCst) > 0 { 1000 / cps.load(Ordering::SeqCst) as u32 } else { 1000 };
+    let mut cps: i32 = input.trim().parse().expect("Mauvais");
+    let mut cps_delay: i32 = if cps > 0 { 1000 / cps } else { 1000 };
     println!("Le delay est de {} ms", cps_delay);
 
     let (tx, rx) = mpsc::channel();
@@ -50,12 +47,10 @@ fn main() {
     let mut randomizer_amount: f32 = 0.4;
     let mut randomizer: bool = false;
     // Lancez un thread pour écouter les événements
-
-    let currente_state = state.load(Ordering::Relaxed);
-    let is_clicking_clone = is_clicking.load(Ordering::Relaxed);
-    thread::spawn(move ||
+    thread::spawn( move ||
+    unsafe {
         loop {
-            if currente_state && is_clicking_clone {
+            if ENABLED && IS_CLICKING {
                 let mut rng = rand::thread_rng();
                 let _delay: f32 = if randomizer {
                     cps_delay as f32 + (cps_delay as f32 * rng.gen_range(0.00..=randomizer_amount))
@@ -65,13 +60,16 @@ fn main() {
                 let now = time::Instant::now();
                 thread::sleep(time::Duration::from_millis(_delay as u64));
 
+                IS_SIMULATED = true;
                 send(&EventType::ButtonPress(Button::Left));
                 send(&EventType::ButtonRelease(Button::Left));
                 // Add a small delay to ensure simulated events are processed before resetting IS_SIMULATED
                 thread::sleep(time::Duration::from_millis(1));
-
+                IS_SIMULATED = false;
                 println!("Clic {:?} | {} cps", now.elapsed(), 1000.0 / now.elapsed().as_millis() as f32);
             }
+
+        }
     });
 
     thread::spawn(move || {
@@ -144,23 +142,4 @@ fn send(event_type: &EventType) {
     }
 
     // Let ths OS catchup (at least macOS)
-}
-
-
-fn start_clicking(running: Arc<AtomicBool>, cps: &Arc<AtomicU16>) {
-    let cps_value = cps.load(Ordering::SeqCst);
-    let cps_delay: i32 = if cps_value > 0 { 1000 / cps_value as i32 } else { 1000 };
-    thread::spawn(move || {
-        while running.load(Ordering::Relaxed) {
-            println!("Click!");
-            thread::sleep(Duration::from_millis(cps_delay.try_into().unwrap()));
-        }
-        println!("Stopped clicking");
-    });
-}
-
-// Fonction pour arrêter
-fn stop_clicking(running: Arc<AtomicBool>) {
-    println!("Stopping clicker...");
-    running.store(false, Ordering::Relaxed);
 }
